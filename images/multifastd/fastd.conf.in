@@ -1,0 +1,30 @@
+bind 163.172.218.175:${FASTD_PORT};
+secret "${FASTD_SECRET}";
+log level ${FASTD_LOGLEVEL};
+mode ${FASTD_MODE};
+method "salsa2012+umac";
+peer limit ${FASTD_PEER_LIMIT};
+hide ip addresses yes;
+mtu ${FASTD_MTU};
+secure handshakes yes;
+status socket "/tmp/fastd${FASTD_INSTANCE}.sock";
+user "nobody";
+drop capabilities yes;
+forward no;
+hide mac addresses yes;
+on up "
+if [ -n \"${DOLLAR}FASTD_INTERFACE_MAC\" ]
+then
+  /sbin/ip link set ${DOLLAR}INTERFACE address $FASTD_INTERFACE_MAC
+fi
+/usr/local/sbin/batctl if add ${DOLLAR}INTERFACE
+/sbin/ip link set up ${DOLLAR}INTERFACE
+";
+
+on down "
+/usr/local/sbin/batctl if del ${DOLLAR}INTERFACE
+";
+
+on verify "
+  true
+";

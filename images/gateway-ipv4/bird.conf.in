@@ -1,0 +1,53 @@
+log stderr all;
+
+router id ${BIRD_IPV4_ROUTER_ID};
+
+# Kernel configuration
+protocol kernel {
+        learn;
+        persist;
+        device routes;
+        scan time 20;
+        import all;
+        export all;
+        kernel table 42;
+};
+
+protocol device {
+        scan time 30;
+};
+
+protocol direct {
+        interface "*";
+}
+
+function is_default() {
+        return net ~ 0.0.0.0/0;
+}
+
+function is_our_public() {
+        return net ~ ${BIRD_IPV4_PUBLIC_ADDRESS}/32;
+};
+
+# BGP import filter for default route
+filter ffrl_bgp_import_filter {
+    if is_default() then accept;
+    reject;
+}
+
+# BGP export filter for out
+filter ffrl_bgp_export_filter {
+    if is_our_public() then accept;
+    reject;
+}
+
+# BGP template for FFRL peerings
+template bgp ffrl_peering {
+    import keep filtered;
+    import filter ffrl_bgp_import_filter;
+    export filter ffrl_bgp_export_filter;
+    next hop self;
+    direct;
+    local as ${BIRD_AS};
+};
+${BIRD_CONFIG_APPEND}

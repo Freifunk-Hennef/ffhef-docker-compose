@@ -1,0 +1,6 @@
+[supervisord]
+nodaemon = true
+pidfile = /run/supervisord.pid
+loglevel = debug
+
+$supervisord_config_append

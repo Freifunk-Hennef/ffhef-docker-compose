@@ -1,0 +1,9 @@
+#!/bin/bash
+if [ -n "$TINC_INTERFACE_MAC" ]
+then
+  /sbin/ip link set $INTERFACE address $TINC_INTERFACE_MAC
+fi
+/sbin/ip link set up dev $INTERFACE
+/usr/local/sbin/batctl if add $INTERFACE
+/sbin/ip link set up bat0
+/sbin/ip link set bat0 master freifunk-net

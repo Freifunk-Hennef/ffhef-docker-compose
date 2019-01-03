@@ -1,0 +1,155 @@
+version: '2.4'
+networks:
+  freifunk-net:
+    driver: bridge
+    enable_ipv6: true
+    internal: true
+    driver_opts:
+      com.docker.network.bridge.name: freifunk-net
+    ipam:
+     config:
+       - subnet: ${MESH_IPV4:?please set MESH_IPV4}
+       - subnet: ${MESH_IPV6:?please set MESH_IPV6}
+
+services:
+    debian-batman:
+      image: ffhef/debian-batman:9.4-2018.1
+      scale: -1
+      build: ./images/debian-batman
+    
+    tinc:
+      image: ffhef/tinc
+      scale: ${TINC_SCALE:-1}
+      depends_on:
+        - debian-batman
+      build: ./images/tinc
+      environment:
+        - TINC_NAME=${HOSTNAME_SHORT:?please set HOSTNAME_SHORT}
+        - TINC_INTERFACE_MAC=${TINC_INTERFACE_MAC:?please set TINC_INTERFACE_MAC}
+      cap_add:
+        - NET_ADMIN
+      devices:
+        - "/dev/net/tun:/dev/net/tun"
+      volumes:
+        - /freifunk/data/tinc/hosts/:/etc/tinc/hosts/:ro
+        - /freifunk/data/tinc/rsa_key.priv:/etc/tinc/rsa_key.priv:ro
+      restart: always
+      network_mode: "host"
+
+    gateway-ipv4:
+      image: ffhef/gateway-ipv4
+      scale: ${GATEWAY_IPV4_SCALE:-1}
+      build: ./images/gateway-ipv4
+      depends_on:
+        - debian-batman
+      environment:
+        - MESH_IPV4=${MESH_IPV4:?please set MESH_IPV4}
+        - BIRD_IPV4_ROUTER_ID=${GATEWAY_IPV4:?please set GATEWAY_IPV4}
+        - BIRD_AS=${GATEWAY_AS:?please set GATEWAY_AS}
+        - BIRD_IPV4_PUBLIC_ADDRESS=${GATEWAY_PUBLIC_IPV4:?please set GATEWAY_PUBLIC_IPV4}
+        - GRE_TUNNELS=${GATEWAY_IPV4_GRE_TUNNELS:?please set GATEWAY_IPV4_GRE_TUNNELS}
+        - BGP_NEIGHBORS=${GATEWAY_IPV4_BGP_NEIGHBORS:?please set BGP_NEIGHBORS}
+      privileged: true
+      devices:
+        - "/dev/net/tun:/dev/net/tun"
+      networks:
+        default:
+        freifunk-net:
+          ipv4_address: ${GATEWAY_IPV4:?please set GATEWAY_IPV4}
+
+    multifastd:
+      image: ffhef/multifastd
+      scale: ${FASTD_SCALE:-1}
+      build: ./images/multifastd
+      depends_on:
+        - tinc
+        - debian-batman
+      environment:
+        - FASTD_SECRET=${FASTD_SECRET:?please set FASTD_SECRET}
+        - FASTD_INSTANCES=${FASTD_INSTANCES:?please set FASTD_INSTANCES}
+      privileged: true
+      devices:
+        - "/dev/net/tun:/dev/net/tun"
+      restart: always
+      network_mode: "host"
+
+    dhcpd:
+      image: ffhef/dhcpd
+      scale: ${DHCPD_SCALE:-1}
+      build: ./images/dhcpd
+      depends_on:
+        - debian-batman
+      environment:
+        - DHCPD_SUBNET_ADDRESS=${DHCPD_SUBNET_ADDRESS:?please set DHCPD_SUBNET_ADDRESS}
+        - DHCPD_SUBNET_NETMASK=${DHCPD_SUBNET_NETMASK:?please set DHCPD_SUBNET_NETMASK}
+        - DHCPD_SUBNET_RANGE_START=${DHCPD_SUBNET_RANGE_START:?please set DHCPD_SUBNET_RANGE_START}
+        - DHCPD_SUBNET_RANGE_END=${DHCPD_SUBNET_RANGE_END:?please set DHCPD_SUBNET_RANGE_END}
+        - DHCPD_SUBNET_ROUTERS=${DHCPD_SUBNET_ROUTERS:?please set DHCPD_SUBNET_ROUTERS}
+        - DHCPD_SUBNET_DOMAIN_NAME_SERVERS=${DHCPD_SUBNET_DOMAIN_NAME_SERVERS:?please set DHCPD_SUBNET_DOMAIN_NAME_SERVERS}
+        - DHCPD_DEFAULT_LEASE_TIME=${DHCPD_DEFAULT_LEASE_TIME:?please set DHCPD_DEFAULT_LEASE_TIME}
+        - DHCPD_MAX_LEASE_TIME=${DHCPD_MAX_LEASE_TIME:?please set DHCPD_MAX_LEASE_TIME}
+      restart: always
+      network_mode: "host"
+
+    recursor:
+      image: ffhef/recursor
+      scale: ${RECURSOR_SCALE:-1}
+      build: ./images/recursor
+      depends_on:
+        - debian-batman
+      restart: always
+      networks:
+        freifunk-net:
+          ipv4_address: ${RECURSOR_IPV4:?please set RECURSOR_IPV4}
+          ipv6_address: ${RECURSOR_IPV6:?please set RECURSOR_IPV6}
+
+    ffhef-fw-dl:
+      image: ffhef/docker-ffhef-fw-dl
+      scale: ${FFHEF_FW_DL_SCALE:-1}
+      build: ./images/ffhef-fw-dl
+      restart: always
+      networks:
+        freifunk-net:
+          ipv4_address: ${FFHEF_FW_DL_IPV4:?please set FFHEF_FW_DL_IPV4}
+          ipv6_address: ${FFHEF_FW_DL_IPV6:?please set FFHEF_FW_DL_IPV6}
+
+    drone:
+      image: drone/drone:0.8
+      scale: ${DRONE_SCALE:-1}
+      ports:
+        - 8080:8000
+        - 9000:9000
+      volumes:
+        - /freifunk/data/drone:/var/lib/drone:rw
+      restart: always
+      environment:
+        - DRONE_ORGS=${DRONE_ORGS:?please set DRONE_ORGS}
+        - DRONE_OPEN=${DRONE_OPEN:?please set DRONE_OPEN}
+        - DRONE_GITHUB_CLIENT=${DRONE_GITHUB_CLIENT:?please set DRONE_GITHUB_CLIENT}
+        - DRONE_GITHUB=${DRONE_GITHUB:?please set DRONE_GITHUB}
+        - DRONE_HOST=${DRONE_HOST:?please set DRONE_HOST}
+        - DRONE_GITHUB_SECRET=${DRONE_GITHUB_SECRET:?please set DRONE_GITHUB_SECRET}
+        - DRONE_SECRET=${DRONE_SECRET:?please set DRONE_SECRET}
+        - DRONE_ADMIN=${DRONE_ADMIN:?please set DRONE_ADMIN}
+        - DATABASE_DRIVER=${DRONE_DATABASE_DRIVER:?please set DRONE_DATABASE_DRIVER}
+        - DATABASE_CONFIG=${DRONE_DATABASE_CONFIG:?please set DRONE_DATABASE_CONFIG}
+
+    drone-autoscaler:
+      image: drone/autoscaler
+      scale: ${DRONE_AUTOSCALER_SCALE:-1}
+      restart: always
+      ports:
+        - 8081:8080
+      environment:
+        - DRONE_LOGS_DEBUG=${DRONE_AUTOSCALER_LOGS_DEBUG:?please set DRONE_AUTOSCALER_LOGS_DEBUG}
+        - DRONE_AGENT_CONCURRENCY=${DRONE_AUTOSCALER_AGENT_CONCURRENCY:?please set DRONE_AUTOSCALER_AGENT_CONCURRENCY}
+        - DRONE_INTERVAL=${DRONE_AUTOSCALER_INTERVAL:?please set DRONE_AUTOSCALER_INTERVAL}
+        - DRONE_POOL_MIN=${DRONE_AUTOSCALER_POOL_MIN:?please set DRONE_AUTOSCALER_POOL_MIN}
+        - DRONE_POOL_MAX=${DRONE_AUTOSCALER_POOL_MAX:?please set DRONE_AUTOSCALER_POOL_MAX}
+        - DRONE_SERVER_PROTO=${DRONE_AUTOSCALER_SERVER_PROTO:?please set DRONE_AUTOSCALER_SERVER_PROTO}
+        - DRONE_SERVER_HOST=${DRONE_AUTOSCALER_SERVER_HOST:?please set DRONE_AUTOSCALER_SERVER_HOST}
+        - DRONE_SERVER_TOKEN=${DRONE_AUTOSCALER_SERVER_TOKEN:?please set DRONE_AUTOSCALER_SERVER_TOKEN}
+        - DRONE_AGENT_HOST=${DRONE_AUTOSCALER_AGENT_HOST:?please set DRONE_AUTOSCALER_AGENT_HOST}
+        - DRONE_AGENT_TOKEN=${DRONE_AUTOSCALER_AGENT_TOKEN:?please set DRONE_AUTOSCALER_AGENT_TOKEN}
+        - DRONE_HETZNERCLOUD_TOKEN=${DRONE_AUTOSCALER_HETZNERCLOUD_TOKEN:?please set DRONE_AUTOSCALER_HETZNERCLOUD_TOKEN}
+        - DRONE_HETZNERCLOUD_TYPE=${DRONE_AUTOSCALER_HETZNERCLOUD_TYPE:?please set DRONE_AUTOSCALER_HETZNERCLOUD_TYPE}
